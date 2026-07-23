@@ -29,7 +29,6 @@ Arguments:
   --model    Ollama vision model (default: granite3.2-vision)
   --start    Start index, 1-based (default: 1)
   --end      End index, 1-based inclusive (default: all)
-  --resize   Max image dimension in pixels (default: 1024)
 """
 
 import base64
@@ -69,20 +68,18 @@ Rules:
 
 
 # ── Image preprocessing ───────────────────────────────────────────────────────
-def preprocess_image(image_path: Path, max_dim: int = 1024) -> str:
-    img = Image.open(image_path).convert("L")
-    w, h = img.size
-    if max(w, h) > max_dim:
-        ratio = max_dim / max(w, h)
-        img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+def preprocess_image(image_path: Path) -> str:
+    from PIL import ImageOps
+    img = Image.open(image_path).convert("L")   # grayscale
+    img = ImageOps.invert(img)                   # white-on-dark → black-on-white
     buf = BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
 # ── Ollama call ───────────────────────────────────────────────────────────────
-def extract_from_image(image_path: Path, model: str, max_dim: int) -> dict:
-    image_data = preprocess_image(image_path, max_dim)
+def extract_from_image(image_path: Path, model: str) -> dict:
+    image_data = preprocess_image(image_path)
     response = ollama.chat(
         model=model,
         messages=[{"role": "user", "content": PROMPT, "images": [image_data]}],
@@ -305,7 +302,6 @@ def main():
     parser.add_argument("--model",  default="granite3.2-vision")
     parser.add_argument("--start",  type=int, default=1)
     parser.add_argument("--end",    type=int, default=None)
-    parser.add_argument("--resize", type=int, default=1024)
     args = parser.parse_args()
 
     try:
@@ -328,14 +324,13 @@ def main():
 
     print(f"Model   : {args.model}")
     print(f"Images  : {len(images)} file(s)  (#{start_idx+1}–#{start_idx+len(images)} of {len(all_images)})")
-    print(f"Resize  : max {args.resize}px\n")
 
     groups, errors = [], []
 
     for idx, img_path in enumerate(images, 1):
         print(f"[{idx}/{len(images)}] {img_path.name} ... ", end="", flush=True)
         try:
-            result = extract_from_image(img_path, args.model, args.resize)
+            result = extract_from_image(img_path, args.model)
             result["_source"] = img_path.name
             groups.append(result)
             print(f"✓  assembly={result.get('assembly')}  qty={result.get('qty')}  {len(result.get('rows',[]))} row(s)")
